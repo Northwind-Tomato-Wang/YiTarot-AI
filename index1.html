@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>易 · 塔 | 星轨问策 v19.0 (DOM Walker Fix)</title>
+    <!-- 引入 Marked.js 用于解析 Markdown -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        :root {
+            --bg-deep: #050505;
+            --accent-gold: #d4af37;
+            --accent-bright-gold: #FFD700;
+            --accent-silver: #c0c0c0;
+            --accent-red: #d13636;
+        }
+
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg-deep);
+            color: #e0e0e0;
+            font-family: 'Segoe UI', 'KaiTi', serif;
+            overflow: hidden;
+            width: 100vw; height: 100vh;
+            display: flex; justify-content: center; align-items: center;
+            user-select: none;
+        }
+
+        /* === 1. 星轨背景 === */
+        #star-wheel {
+            position: fixed; top: 50%; left: 50%;
+            width: 200vmax; height: 200vmax;
+            transform: translate(-50%, -50%);
+            z-index: -1;
+            animation: rotateStars 240s linear infinite;
+            pointer-events: none;
+        }
+        .star { position: absolute; background: #fff; border-radius: 50%; }
+        @keyframes rotateStars {
+            from { transform: translate(-50%, -50%) rotate(0deg); }
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+
+        /* === 全局 HUD === */
+        #hud-layer {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 100;
+        }
+        #hud-hexagram, .hud-card { pointer-events: auto !important; }
+
+        /* 关键词层 */
+        #keywords-layer {
+            position: fixed; bottom: 40px; left: 0; width: 100%; height: 100px;
+            pointer-events: auto; z-index: 50;
+            display: flex; justify-content: center; align-items: flex-end; gap: 60px;
+        }
+        .floating-keyword {
+            color: var(--accent-gold);
+            font-family: "Microsoft YaHei", sans-serif;
+            font-size: 32px; font-weight: 900; letter-spacing: 4px;
+            text-shadow: 0 0 15px rgba(0,0,0,0.8), 0 0 5px var(--accent-gold);
+            opacity: 0; 
+            animation: floatText 5s ease-in-out infinite;
+            cursor: default; transition: all 0.3s;
+        }
+        .floating-keyword:hover {
+            transform: scale(1.1); text-shadow: 0 0 20px var(--accent-gold);
+            animation-play-state: paused; opacity: 1 !important;
+        }
+        @keyframes floatText {
+            0% { transform: translateY(0); opacity: 0.1; }
+            50% { transform: translateY(-10px); opacity: 0.6; }
+            100% { transform: translateY(0); opacity: 0.1; }
+        }
+
+        /* === 启动页 === */
+        #stage-start {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 200; background: rgba(5,5,5,0.4);
+            transition: opacity 1.5s ease-in-out;
+        }
+        .start-input-box {
+            background: rgba(0,0,0,0.85); border: 1px solid var(--accent-gold);
+            padding: 50px; border-radius: 12px; text-align: center; width: 600px;
+            box-shadow: 0 0 50px rgba(212,175,55,0.15);
+        }
+        .start-input-box h2 { color: var(--accent-gold); font-weight: normal; letter-spacing: 8px; margin-top: 0; font-size: 32px; }
+        .start-input-box input {
+            width: 80%; padding: 15px; margin: 40px 0;
+            background: #111; border: 1px solid #444; color: #fff;
+            font-size: 18px; text-align: center; outline: none;
+            border-radius: 4px; transition: border 0.3s;
+        }
+        .start-input-box input:focus { border-color: var(--accent-gold); }
+
+        /* === 通用组件 === */
+        .btn {
+            background: linear-gradient(135deg, #b8860b, #d4af37);
+            border: none; padding: 12px 30px; color: #000; font-weight: bold;
+            cursor: pointer; border-radius: 30px; font-size: 1.1rem;
+            box-shadow: 0 0 15px rgba(212,175,55,0.3); transition: transform 0.2s;
+        }
+        .btn:hover { transform: scale(1.05); box-shadow: 0 0 25px rgba(212,175,55,0.5); }
+        .hidden { display: none !important; }
+
+        /* Stages */
+        #stage-iching, #stage-tarot {
+            width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 0.5s; position: absolute; top:0; left:0;
+        }
+
+        /* Coins */
+        .coin-area { display: flex; gap: 40px; perspective: 1000px; margin-bottom: 60px; }
+        .coin { width: 120px; height: 120px; position: relative; transform-style: preserve-3d; transition: transform 1.5s; }
+        .coin-face { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; border-radius: 50%; box-shadow: inset 0 0 15px rgba(0,0,0,0.8), 0 5px 15px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; }
+        .face-yang { transform: rotateX(0deg); background: radial-gradient(circle at 30% 30%, #fbeea0 0%, #d4af37 40%, #8a6e3e 100%); }
+        .face-yin { transform: rotateX(180deg); background: #151515; border: 4px solid #d4af37; }
+        .coin-hole { width: 32px; height: 32px; background: var(--bg-deep); border: 2px solid #8a6e3e; box-shadow: inset 1px 1px 4px rgba(0,0,0,0.8); }
+        .face-yin .coin-hole { border-color: #d4af37; }
+
+        /* Hex Source */
+        #hex-container-source {
+            width: 220px; padding: 20px;
+            background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+            display: flex; flex-direction: column-reverse; gap: 12px; transition: all 0.5s;
+        }
+        .yao-line { width: 100%; height: 20px; border-radius: 4px; opacity: 0; animation: fadeIn 0.5s forwards; position: relative; }
+        @keyframes fadeIn { to { opacity: 1; } }
+        .yao-yang { background: linear-gradient(90deg, #b8860b, #fbeea0, #b8860b); box-shadow: 0 0 8px rgba(212, 175, 55, 0.4); }
+        .yao-yin { display: flex; justify-content: space-between; }
+        .yao-yin::before, .yao-yin::after { content: ''; width: 42%; height: 100%; background: linear-gradient(90deg, #b8860b, #fbeea0, #b8860b); border-radius: 4px; box-shadow: 0 0 8px rgba(212, 175, 55, 0.4); }
+        .yao-changing.yao-yang { background: var(--accent-red); box-shadow: 0 0 15px var(--accent-red); }
+        .yao-changing.yao-yin::before, .yao-changing.yao-yin::after { background: var(--accent-red); box-shadow: 0 0 15px var(--accent-red); }
+
+        /* Tarot Selection */
+        .deck-row { display: flex; gap: 40px; perspective: 1000px; margin-top: 40px; }
+        .tarot-card-select { width: 200px; height: 350px; position: relative; transform-style: preserve-3d; cursor: pointer; transition: transform 0.3s; }
+        .tarot-card-select:hover { transform: translateY(-20px) scale(1.05); }
+        .card-inner { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 15px 40px rgba(0,0,0,0.6); border-radius: 8px; }
+        .card-inner.flipped { transform: rotateY(180deg); }
+        .tarot-frame { position: absolute; width: 100%; height: 100%; backface-visibility: hidden; background-color: #0a0a0a; border: 1px solid var(--accent-gold); border-radius: 8px; padding: 6px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; }
+        .cf-front { transform: rotateY(180deg); box-shadow: 0 0 15px rgba(212,175,55,0.2); }
+        .tarot-content { width: 100%; height: 100%; background-size: cover; background-position: center; border-radius: 1px; }
+        .card-label-container { position: absolute; bottom: -40px; width: 100%; text-align: center; opacity: 0; transition: opacity 0.5s 0.2s; }
+        .flipped + .card-label-container { opacity: 1; }
+        .card-label-text { color: var(--accent-gold); font-size: 18px; letter-spacing: 2px; text-shadow: 0 2px 4px #000; }
+
+        /* Final Stage Layer */
+        #stage-final { width: 100%; height: 100%; position: relative; opacity: 0; pointer-events: none; transition: opacity 1s; }
+        #stage-final.active { opacity: 1; pointer-events: auto; }
+        
+        #hud-hexagram { position: absolute; transform-origin: center center; transition: all 1.5s cubic-bezier(0.25, 1, 0.5, 1); }
+        
+        /* HUD Card (Final) */
+        .hud-card { 
+            position: absolute; width: 120px; height: 210px; 
+            background: transparent; 
+            perspective: 1000px; 
+            transform-origin: center center; 
+            transition: top 1.5s, left 1.5s, width 1.5s, height 1.5s, transform 1.5s;
+            cursor: pointer; z-index: 150;
+        }
+        .hud-inner-wrapper { 
+            width:100%; height:100%; position:relative; 
+            transform-style: preserve-3d; 
+            transition: transform 0.8s cubic-bezier(0.4, 0.0, 0.2, 1); 
+            border-radius: 8px; box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        } 
+        .hud-face {
+            width: 100%; height: 100%; position: absolute; top: 0; left: 0;
+            backface-visibility: hidden; -webkit-backface-visibility: hidden;
+            border-radius: 8px; border: 1px solid var(--accent-gold);
+            padding: 5px; box-sizing: border-box;
+            background: #0a0a0a; display: flex; align-items: center; justify-content: center;
+        }
+        .hud-inner-img { 
+            width: 100%; height: 100%; 
+            background-size: cover; background-position: center; 
+            border-radius: 1px; 
+        }
+        .hud-face-back { transform: rotateY(180deg); }
+        .hud-inner-back-img { width: 100%; height: 100%; background-image: url('./0.png'); background-size: cover; background-position: center; }
+
+        /* Loading Overlay */
+        #loading-overlay { position: fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index: 500; display: none; }
+        #loading-text { position: absolute; top: 10%; width: 100%; text-align: center; color: var(--accent-gold); font-size: 24px; letter-spacing: 6px; text-shadow: 0 0 10px rgba(212,175,55,0.8); animation: breathe 2s infinite; }
+        @keyframes breathe { 0%,100%{opacity:0.6;} 50%{opacity:1;} }
+        .loader-line { position: absolute; }
+        .l-top { top:0; left:0; width:100%; height:2px; background: linear-gradient(90deg, transparent, var(--accent-gold)); animation: anim-top 2s linear infinite; }
+        .l-right { top:0; right:0; width:2px; height:100%; background: linear-gradient(180deg, transparent, var(--accent-silver)); animation: anim-right 2s linear infinite; animation-delay: 1s; }
+        .l-bottom { bottom:0; right:0; width:100%; height:2px; background: linear-gradient(270deg, transparent, var(--accent-gold)); animation: anim-bottom 2s linear infinite; }
+        .l-left { bottom:0; left:0; width:2px; height:100%; background: linear-gradient(0deg, transparent, var(--accent-silver)); animation: anim-left 2s linear infinite; animation-delay: 1s; }
+        @keyframes anim-top { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+        @keyframes anim-right { 0% { transform: translateY(-100%); } 100% { transform: translateY(100%); } }
+        @keyframes anim-bottom { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
+        @keyframes anim-left { 0% { transform: translateY(100%); } 100% { transform: translateY(-100%); } }
+
+        /* Chat Modal */
+        #ai-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 75%; max-width: 900px; height: 75vh; background: rgba(10, 10, 12, 0.98); border: 1px solid var(--accent-gold); border-radius: 12px; z-index: 600; display: none; flex-direction: column; overflow: hidden; box-shadow: 0 0 80px rgba(0,0,0,0.9); }
+        #chat-history { flex: 1; overflow-y: auto; padding: 40px; font-size: 17px; line-height: 1.8; color: #ccc; }
+        
+        /* --- AI Output Styling --- */
+        .chat-msg-ai { margin-bottom: 30px; text-align: justify; }
+        .chat-msg-ai h3, .chat-msg-ai h4 { color: var(--accent-gold); margin-top: 25px; margin-bottom: 15px; font-weight: normal; letter-spacing: 2px; border-bottom: 1px solid #333; padding-bottom: 8px; }
+        .chat-msg-ai p { margin-bottom: 18px; line-height: 2; text-indent: 0; } 
+        
+        /* 强制隐藏列表符号 */
+        .chat-msg-ai ul, .chat-msg-ai ol { list-style: none !important; padding-left: 0 !important; margin: 0 0 15px 0 !important; }
+        .chat-msg-ai li { margin-bottom: 12px !important; padding-left: 0 !important; display: block !important; }
+        .chat-msg-ai li::before { content: none !important; }
+
+        /* 强制金色加粗：覆盖 strong, b, em, i */
+        .chat-msg-ai strong, .chat-msg-ai b, .chat-msg-ai em, .chat-msg-ai i { 
+            color: var(--accent-bright-gold) !important; 
+            font-weight: 900 !important; 
+            font-style: normal !important;
+            text-shadow: 0 0 12px rgba(255, 215, 0, 0.5) !important; 
+            font-size: 1.05em;
+        }
+
+        .chat-msg-user { text-align: right; margin-bottom: 20px; color: var(--accent-gold); font-style: italic; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        #chat-input-area { height: 80px; background: #000; border-top: 1px solid #333; display: flex; align-items: center; padding: 0 20px; }
+        #chat-input { flex: 1; background: #111; border: 1px solid #444; color: #fff; padding: 10px 15px; border-radius: 4px; outline: none; font-size: 16px; }
+        #chat-input:focus { border-color: var(--accent-gold); }
+        
+        /* 修正后的光标位置：确保它是行内块 */
+        .ai-cursor { 
+            display: inline-block; width: 8px; height: 1.2em; 
+            background: var(--accent-gold); 
+            animation: blink 1s infinite; 
+            vertical-align: text-bottom;
+            margin-left: 2px; 
+        }
+        @keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0;} }
+
+        /* Config */
+        #config-btn { position: fixed; bottom: 20px; right: 20px; font-size: 24px; cursor: pointer; opacity: 0.3; z-index: 900; color:#fff; transition: opacity 0.3s;}
+        #config-btn:hover { opacity: 1; }
+        #config-panel { position: fixed; bottom: 60px; right: 20px; width: 280px; background: #111; border: 1px solid #333; padding: 20px; display: none; z-index: 900; border-radius: 8px; }
+        #config-panel input { width: 100%; margin-bottom: 10px; background:#000; color:#fff; border:1px solid #444; padding:8px; box-sizing:border-box;}
+        #config-panel label { color: #888; font-size: 12px; display:block; margin-bottom:5px; }
+    </style>
+</head>
+<body>
+
+    <div id="star-wheel"></div>
+
+    <!-- 0. 底部关键字层 -->
+    <div id="keywords-layer"></div>
+
+    <!-- 1. 启动页 -->
+    <div id="stage-start">
+        <div class="start-input-box">
+            <h2>星 轨 问 策</h2>
+            <input type="text" id="initial-question" placeholder="请在此输入您心中的困惑..." autocomplete="off">
+            <button class="btn" onclick="startJourney()">开 启 启 示</button>
+        </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud-layer">
+        <div id="hud-hexagram" class="hidden"></div>
+        <div id="hud-card-1" class="hud-card hidden"></div>
+        <div id="hud-card-2" class="hud-card hidden"></div>
+        <div id="hud-card-3" class="hud-card hidden"></div>
+    </div>
+
+    <!-- Stage 2 -->
+    <div id="stage-iching" class="hidden">
+        <h2 style="color:var(--accent-gold); margin-bottom:40px; letter-spacing:6px; font-weight:normal; opacity:0.8;">星轨 · 问策</h2>
+        <div class="coin-area">
+            <div class="coin" id="c1"><div class="coin-face face-yang"><div class="coin-hole"></div></div><div class="coin-face face-yin"><div class="coin-hole"></div></div></div>
+            <div class="coin" id="c2"><div class="coin-face face-yang"><div class="coin-hole"></div></div><div class="coin-face face-yin"><div class="coin-hole"></div></div></div>
+            <div class="coin" id="c3"><div class="coin-face face-yang"><div class="coin-hole"></div></div><div class="coin-face face-yin"><div class="coin-hole"></div></div></div>
+        </div>
+        <div id="hex-container-source"></div>
+        <div id="hex-name-display" style="margin-top:20px; color:var(--accent-gold); height:24px;"></div>
+        <button class="btn" id="btn-toss" onclick="tossCoins()">掷 铜 钱 (1/6)</button>
+    </div>
+
+    <!-- Stage 3 -->
+    <div id="stage-tarot" class="hidden">
+        <h2 id="tarot-hint" style="color:var(--accent-gold); font-weight:normal;">抽取：过去</h2>
+        <div class="deck-row" id="tarot-deck"></div>
+    </div>
+
+    <!-- Stage 4 -->
+    <div id="stage-final"></div>
+
+    <!-- Loading -->
+    <div id="loading-overlay">
+        <div id="loading-text">正在连接星轨，请稍后...</div>
+        <div class="loader-line l-top"></div><div class="loader-line l-right"></div><div class="loader-line l-bottom"></div><div class="loader-line l-left"></div>
+    </div>
+
+    <!-- AI Modal -->
+    <div id="ai-modal">
+        <div style="position:absolute; top:20px; right:20px; cursor:pointer; color:#888;" onclick="document.getElementById('ai-modal').style.display='none'">✕</div>
+        <div id="chat-history"></div>
+        <div id="chat-input-area">
+            <input type="text" id="chat-input" placeholder="继续追问...">
+            <button class="btn" style="margin-left:10px; padding: 8px 20px; font-size:14px;" onclick="handleFollowUp()">发送</button>
+        </div>
+    </div>
+
+    <!-- Config -->
+    <div id="config-btn" onclick="toggleConfig()">⚙️</div>
+    <div id="config-panel">
+        <h4 style="margin:0 0 10px 0; color:var(--accent-gold);">API 设置</h4>
+        <label>Base URL</label> <input type="text" id="cfg-url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+        <label>API Key</label> <input type="password" id="cfg-key" placeholder="sk-...">
+        <label>Model</label> <input type="text" id="cfg-model" placeholder="qwen-plus">
+        <div style="text-align:right;"><button onclick="toggleConfig()" style="cursor:pointer; padding:5px 10px;">Close</button></div>
+    </div>
+
+<script>
+    // === 0. 星轨 ===
+    (function initStars() {
+        const wheel = document.getElementById('star-wheel');
+        const count = 300; 
+        const fragment = document.createDocumentFragment();
+        for (let i = 0; i < count; i++) {
+            const star = document.createElement('div');
+            star.className = 'star';
+            const r = 20 + Math.random() * 80; 
+            const angle = Math.random() * 360;
+            const size = Math.random() * 2 + 1;
+            const opacity = Math.random() * 0.7 + 0.3;
+            star.style.width = size + 'px'; star.style.height = size + 'px';
+            star.style.opacity = opacity; star.style.left = '50%'; star.style.top = '50%';
+            star.style.transform = `rotate(${angle}deg) translate(${r}vmax)`;
+            fragment.appendChild(star);
+        }
+        wheel.appendChild(fragment);
+    })();
+
+    // === 1. 数据定义 ===
+    const HEX_MAP = { "111111":"乾为天", "000000":"坤为地", "100010":"水雷屯", "010001":"山水蒙", "111010":"水天需", "010111":"天水讼", "010000":"地水师", "000010":"水地比", "111011":"风天小畜", "110111":"天泽履", "111000":"地天泰", "000111":"天地否", "101111":"天火同人", "111101":"火天大有", "001000":"地山谦", "000100":"雷地豫", "100110":"泽雷随", "011001":"山风蛊", "110000":"地泽临", "000011":"风地观", "100101":"火雷噬嗑", "101001":"山火贲", "000001":"山地剥", "100000":"地雷复", "100111":"天雷无妄", "111001":"山天大畜", "100001":"山雷颐", "011110":"泽风大过", "010010":"坎为水", "101101":"离为火", "001110":"泽山咸", "011100":"雷风恒", "001111":"天山遁", "111100":"雷天大壮", "000101":"火地晋", "101000":"地火明夷", "101011":"风火家人", "110101":"火泽睽", "001010":"水山蹇", "010100":"雷水解", "110001":"山泽损", "100011":"风雷益", "111110":"泽天夬", "011111":"天风姤", "000110":"泽地萃", "011000":"地风升", "010110":"泽水困", "011010":"水风井", "101110":"泽火革", "011101":"火风鼎", "100100":"震为雷", "001001":"艮为山", "001011":"风山渐", "110100":"雷泽归妹", "101100":"雷火丰", "001101":"火山旅", "011011":"巽为风", "110110":"兑为泽", "010011":"风水涣", "110010":"水泽节", "110011":"风泽中孚", "001100":"雷山小过", "101010":"水火既济", "010101":"火水未济" };
+    
+    const TAROT_DB = [
+        {n:"愚者"},{n:"魔术师"},{n:"女祭司"},{n:"皇后"},{n:"皇帝"}, {n:"教皇"},{n:"恋人"},{n:"战车"},{n:"力量"},{n:"隐士"},
+        {n:"命运之轮"},{n:"正义"},{n:"倒吊人"},{n:"死神"},{n:"节制"}, {n:"恶魔"},{n:"高塔"},{n:"星星"},{n:"月亮"},{n:"太阳"}, {n:"审判"},{n:"世界"}
+    ];
+
+    let globalUserQuestion = "";
+    let hexData = [];
+    let tarotData = [];
+    let ichingRound = 0;
+    let coinAngles = [0,0,0];
+    let chatHistory = [];
+    
+    let idleFlipTimer = null;
+    let cardFlipTimers = [null, null, null]; 
+    let lastFlippedIndex = -1; 
+
+    // === 2. 启动 & 异步AI关键词 ===
+    function startJourney() {
+        const q = document.getElementById('initial-question').value;
+        if(!q) return alert("请告诉我您的困惑...");
+        globalUserQuestion = q;
+
+        const startDiv = document.getElementById('stage-start');
+        startDiv.style.opacity = 0;
+        startDiv.style.pointerEvents = 'none';
+
+        fetchKeywordsAI(q);
+
+        setTimeout(() => {
+            startDiv.classList.add('hidden');
+            document.getElementById('stage-iching').classList.remove('hidden');
+        }, 1500); 
+    }
+
+    async function fetchKeywordsAI(question) {
+        let url = document.getElementById('cfg-url').value || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        let key = document.getElementById('cfg-key').value;
+        let model = document.getElementById('cfg-model').value || "qwen-plus";
+
+        if(!key) {
+            renderKeywords(["星轨", "命运", "启示"]);
+            return;
+        }
+
+        try {
+            const res = await fetch(url + (url.endsWith('/')?'chat/completions':'/chat/completions'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{
+                        role:"user", 
+                        content: `请从以下问题中提取3个最核心的关键词，词语控制在2-4字，不要任何标点符号，用空格隔开：${question}`
+                    }]
+                })
+            });
+            const data = await res.json();
+            const text = data.choices[0].message.content;
+            const words = text.split(/\s+/).filter(w => w.length > 0).slice(0, 3);
+            renderKeywords(words);
+        } catch(e) {
+            console.error(e);
+            renderKeywords(["启示", "探索", "前行"]); 
+        }
+    }
+
+    function renderKeywords(words) {
+        const container = document.getElementById('keywords-layer');
+        container.innerHTML = '';
+        words.forEach((word, i) => {
+            const span = document.createElement('span');
+            span.className = 'floating-keyword'; span.innerText = word;
+            span.style.animationDelay = `${i * 1.5}s`;
+            container.appendChild(span);
+        });
+    }
+
+    // === 3. 六爻 ===
+    function tossCoins() {
+        if(ichingRound >= 6) return;
+        const btn = document.getElementById('btn-toss');
+        btn.disabled = true; btn.innerText = "...";
+
+        const coins = [document.getElementById('c1'), document.getElementById('c2'), document.getElementById('c3')];
+        const results = coins.map(() => Math.random() > 0.5 ? 3 : 2); 
+
+        coins.forEach((c, i) => {
+            let current = coinAngles[i];
+            let targetMod = (results[i]===3) ? 0 : 180;
+            let delta = 1440; 
+            let nextAngle = current + delta + (targetMod - (current+delta)%360);
+            coinAngles[i] = nextAngle;
+            let dur = 1.2 + Math.random()*0.5;
+            c.style.transition = `transform ${dur}s cubic-bezier(0.1, 0.6, 0.2, 1)`;
+            c.style.transform = `rotateX(${nextAngle}deg)`;
+        });
+
+        setTimeout(() => {
+            const sum = results.reduce((a,b)=>a+b, 0);
+            const isYang = (sum===7||sum===9);
+            const isMoving = (sum===6||sum===9);
+            hexData.push({val:sum, isYang, isMoving});
+            
+            const line = document.createElement('div');
+            line.className = `yao-line ${isYang?'yao-yang':'yao-yin'} ${isMoving?'yao-changing':''}`;
+            document.getElementById('hex-container-source').appendChild(line);
+
+            ichingRound++;
+            if(ichingRound < 6) {
+                btn.disabled = false; btn.innerText = `掷 铜 钱 (${ichingRound+1}/6)`;
+            } else {
+                finishIching();
+            }
+        }, 1600);
+    }
+
+    function finishIching() {
+        const bin = hexData.map(d=>d.isYang?'1':'0').join('');
+        const name = HEX_MAP[bin] || "未知";
+        document.getElementById('hex-name-display').innerText = name;
+        document.getElementById('btn-toss').style.opacity = 0;
+
+        setTimeout(() => {
+            const source = document.getElementById('hex-container-source');
+            const rect = source.getBoundingClientRect();
+            const hudHex = document.getElementById('hud-hexagram');
+            hudHex.innerHTML = source.innerHTML;
+            hudHex.classList.remove('hidden');
+            hudHex.style.left = rect.left + 'px'; hudHex.style.top = rect.top + 'px';
+            hudHex.style.width = rect.width + 'px'; hudHex.style.height = rect.height + 'px';
+            hudHex.style.display = 'flex'; hudHex.style.flexDirection = 'column-reverse';
+            hudHex.style.gap = '12px'; hudHex.style.padding = '20px';
+            hudHex.style.background = 'rgba(255,255,255,0.05)';
+            hudHex.style.border = '1px solid #444'; hudHex.style.borderRadius = '8px';
+
+            source.style.opacity = 0;
+            void hudHex.offsetWidth; 
+
+            hudHex.style.left = (window.innerWidth - 130) + 'px';
+            hudHex.style.top = '30px';
+            hudHex.style.transform = 'scale(0.4)';
+
+            setTimeout(() => {
+                document.getElementById('stage-iching').classList.add('hidden');
+                document.getElementById('stage-tarot').classList.remove('hidden');
+                startTarotRound(0);
+            }, 1000);
+        }, 1000);
+    }
+
+    // === 4. 塔罗 ===
+    function startTarotRound(idx) {
+        if(idx >= 3) { finishTarotAll(); return; }
+        const titles = ["过去", "现在", "未来"];
+        document.getElementById('tarot-hint').innerText = `抽取：${titles[idx]}`;
+        const deck = document.getElementById('tarot-deck');
+        deck.innerHTML = '';
+        
+        for(let i=0; i<3; i++) {
+            const wrap = document.createElement('div');
+            wrap.className = 'tarot-card-select';
+            wrap.innerHTML = `
+                <div class="card-inner">
+                    <div class="cf-back tarot-frame">
+                        <div class="tarot-content" style="background-image:url('./0.png')"></div>
+                    </div>
+                    <div class="cf-front tarot-frame">
+                        <div class="tarot-content"></div>
+                    </div>
+                </div>
+                <div class="card-label-container"><div class="card-label-text"></div></div>
+            `;
+            wrap.onclick = () => pickCard(idx, wrap);
+            deck.appendChild(wrap);
+        }
+    }
+
+    function pickCard(roundIdx, el) {
+        if(el.style.pointerEvents === 'none') return;
+        document.querySelectorAll('.tarot-card-select').forEach(c => c.style.pointerEvents = 'none');
+
+        const dataIdx = Math.floor(Math.random() * TAROT_DB.length); 
+        const data = TAROT_DB[dataIdx];
+        const isUp = Math.random()>0.5;
+        tarotData.push({ ...data, isUp, pos: ["过去","现在","未来"][roundIdx], imgIndex: dataIdx+1 });
+
+        const imgFile = `${dataIdx + 1}.png`;
+        const frontContent = el.querySelector('.cf-front .tarot-content');
+        frontContent.style.backgroundImage = `url('./${imgFile}')`;
+        if(!isUp) frontContent.style.transform = "rotateZ(180deg)";
+
+        const labelText = el.querySelector('.card-label-text');
+        labelText.innerText = `${data.n} ${isUp?'':'(逆)'}`;
+        el.querySelector('.card-inner').classList.add('flipped');
+
+        setTimeout(() => {
+            const rect = el.getBoundingClientRect();
+            const hudId = `hud-card-${roundIdx+1}`;
+            const hudCard = document.getElementById(hudId);
+            
+            hudCard.innerHTML = `
+                <div class="hud-inner-wrapper">
+                    <div class="hud-face hud-face-front">
+                        <div class="hud-inner-img" style="background-image:url('./${imgFile}')"></div>
+                    </div>
+                    <div class="hud-face hud-face-back">
+                        <div class="hud-inner-back-img"></div>
+                    </div>
+                </div>
+            `;
+            
+            if(!isUp) {
+                hudCard.querySelector('.hud-inner-img').style.transform = "rotateZ(180deg)";
+            }
+
+            hudCard.classList.remove('hidden');
+            hudCard.style.left = rect.left + 'px'; hudCard.style.top = rect.top + 'px';
+            hudCard.style.width = rect.width + 'px'; hudCard.style.height = rect.height + 'px';
+
+            el.style.opacity = 0; 
+            void hudCard.offsetWidth; 
+
+            hudCard.style.left = (30 + roundIdx * 70) + 'px';
+            hudCard.style.top = '30px';
+            hudCard.style.width = '60px'; hudCard.style.height = '100px';
+
+            document.querySelectorAll('.tarot-card-select').forEach(c => { if(c!==el) c.style.opacity=0; });
+            setTimeout(() => { startTarotRound(roundIdx+1); }, 600);
+        }, 800);
+    }
+
+    // === 5. 归位 & 交互持久化 ===
+    function finishTarotAll() {
+        document.getElementById('stage-tarot').classList.add('hidden');
+        const stageFinal = document.getElementById('stage-final');
+        stageFinal.classList.add('active');
+
+        for(let i=0; i<3; i++) {
+            const hc = document.getElementById(`hud-card-${i+1}`);
+            hc.style.left = '30%'; hc.style.top = '45%';
+            const xOffset = (i-1) * 180; 
+            hc.style.transform = `translate(calc(-50% + ${xOffset}px), -50%)`;
+            hc.style.width = '170px'; hc.style.height = '300px';
+
+            const lbl = document.createElement('div');
+            lbl.innerText = ["过去","现在","未来"][i];
+            lbl.style.cssText = `position:absolute; bottom:-50px; width:100%; text-align:center; color:#999; font-size:16px; letter-spacing:4px; font-weight:bold; pointer-events:none;`;
+            hc.appendChild(lbl);
+
+            hc.onclick = () => toggleCardFlip(i);
+        }
+
+        const hex = document.getElementById('hud-hexagram');
+        hex.style.display = 'flex'; hex.style.flexDirection = 'column'; 
+        hex.style.alignItems = 'center'; hex.style.justifyContent = 'center';
+        hex.style.width = 'auto'; hex.style.height = 'auto'; hex.style.padding = '0';
+        hex.innerHTML = '';
+        const linesWrapper = document.createElement('div');
+        linesWrapper.id = "jelly-wrapper";
+        linesWrapper.style.cssText = "display:flex; flex-direction:column-reverse; gap:16px; width:360px; pointer-events:auto;"; 
+        
+        hexData.forEach(d => {
+            const l = document.createElement('div');
+            l.className = `yao-line ${d.isYang?'yao-yang':'yao-yin'} ${d.isMoving?'yao-changing':''}`;
+            l.style.height = "24px"; l.style.borderRadius = "4px"; l.style.cursor = "grab";
+            linesWrapper.appendChild(l);
+            initJellyDrag(l, linesWrapper); 
+        });
+        hex.appendChild(linesWrapper);
+
+        const nameDiv = document.createElement('div');
+        const bin = hexData.map(d=>d.isYang?'1':'0').join('');
+        nameDiv.innerHTML = `${HEX_MAP[bin]}<br><span style="font-size:18px; opacity:0.6; font-weight:normal; letter-spacing:4px;">(本卦)</span>`;
+        nameDiv.style.cssText = "text-align:center; color:#d4af37; font-size:50px; font-weight:bold; letter-spacing:10px; line-height:1.2; margin-top:40px;";
+        hex.appendChild(nameDiv);
+
+        hex.style.left = '75%'; hex.style.top = '50%';
+        hex.style.transform = 'translate(-50%, -50%)';
+        hex.style.background = 'transparent'; hex.style.border = 'none'; hex.style.boxShadow = 'none';
+
+        startLoadingMode();
+        fetchAIResponse();
+    }
+
+    // === 6. 交互动画 ===
+    function startLoadingMode() {
+        document.getElementById('loading-overlay').style.display = 'block';
+        scheduleNextIdleFlip();
+    }
+
+    function scheduleNextIdleFlip() {
+        const delay = 9000 + Math.random() * 6000;
+        idleFlipTimer = setTimeout(() => {
+            triggerIdleFlip();
+            scheduleNextIdleFlip();
+        }, delay);
+    }
+
+    function triggerIdleFlip() {
+        let idx = Math.floor(Math.random() * 3);
+        if(idx === lastFlippedIndex) idx = (idx + 1) % 3;
+        lastFlippedIndex = idx;
+
+        const wrapper = document.getElementById(`hud-card-${idx+1}`).querySelector('.hud-inner-wrapper');
+        if(!isBackSide(wrapper)) {
+            wrapper.style.transform = "rotateY(180deg)";
+            setTimeout(() => {
+                if(isBackSide(wrapper)) {
+                    wrapper.style.transform = "rotateY(0deg)";
+                }
+            }, 1500);
+        }
+    }
+
+    function isBackSide(el) {
+        return el.style.transform.includes('180deg');
+    }
+
+    function toggleCardFlip(idx) {
+        const hc = document.getElementById(`hud-card-${idx+1}`);
+        const wrapper = hc.querySelector('.hud-inner-wrapper');
+        
+        if(isBackSide(wrapper)) {
+            wrapper.style.transform = "rotateY(0deg)";
+            if(cardFlipTimers[idx]) clearTimeout(cardFlipTimers[idx]);
+        } else {
+            wrapper.style.transform = "rotateY(180deg)";
+            if(cardFlipTimers[idx]) clearTimeout(cardFlipTimers[idx]);
+            cardFlipTimers[idx] = setTimeout(() => {
+                wrapper.style.transform = "rotateY(0deg)";
+            }, 3000);
+        }
+    }
+
+    function stopLoadingMode() {
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+
+    function initJellyDrag(triggerEl, wrapper) {
+        let isDown = false;
+        let startX, startY;
+        
+        triggerEl.addEventListener('mousedown', (e) => {
+            e.stopPropagation();
+            isDown = true; startX = e.clientX; startY = e.clientY;
+            const lines = wrapper.querySelectorAll('.yao-line');
+            lines.forEach(l => {
+                l.style.transition = 'none'; 
+                l.style.cursor = 'grabbing';
+            });
+        });
+
+        window.addEventListener('mouseup', () => {
+            if(!isDown) return;
+            isDown = false; 
+            const lines = wrapper.querySelectorAll('.yao-line');
+            lines.forEach(l => {
+                l.style.cursor = 'grab';
+                l.style.transition = 'transform 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275)';
+                l.style.transform = 'translate(0, 0)';
+            });
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if(!isDown) return;
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            const limit = 50;
+            const moveX = Math.max(-limit, Math.min(limit, dx));
+            const moveY = Math.max(-limit, Math.min(limit, dy));
+
+            const lines = Array.from(wrapper.querySelectorAll('.yao-line'));
+            const centerIdx = lines.indexOf(triggerEl);
+
+            lines.forEach((l, i) => {
+                const dist = Math.abs(i - centerIdx);
+                const factor = Math.max(0.2, 1 - dist * 0.3); 
+                l.style.transform = `translate(${moveX * factor}px, ${moveY * factor}px)`;
+            });
+        });
+    }
+
+    // === 8. AI Request ===
+    async function fetchAIResponse() {
+        const bin = hexData.map(d=>d.isYang?'1':'0').join('');
+        const changes = hexData.map((d,i) => d.isMoving ? `第${i+1}爻动` : "").filter(s=>s).join('，');
+        const cardsStr = tarotData.map(t=>`${t.pos}:${t.n}${t.isUp?'(正)':'(逆)'}`).join('，');
+        
+        const systemPrompt = `
+        你是一位精通周易与塔罗的神秘学大师。
+        用户困惑：${globalUserQuestion}
+        【周易卦象】：${HEX_MAP[bin]} (${changes ? "变爻：" + changes : "无变爻"})
+        【塔罗牌阵】：${cardsStr}
+        
+        请结合两者进行深度解析。
+        
+        *** 格式绝对禁令 ***：
+        1. **严禁**使用任何列表符号（如 - / * / 1. 等）。必须将所有内容写成流畅的纯文本段落。
+        2. **强制**每段话必须包含 2-4 个 **加粗词汇**（即使用双星号标记）。这是视觉重点，请务必执行。
+        3. 语气神秘、优雅、富有哲理，温暖人心。
+        4. 篇幅要求：周易与塔罗的篇幅要相当。
+        5. 内容要求：解释塔罗牌面含义；解释卦辞/变爻辞；最后给出一段综合指引。
+        `;
+
+        chatHistory.push({role: "system", content: systemPrompt});
+        
+        let url = document.getElementById('cfg-url').value || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        let key = document.getElementById('cfg-key').value;
+        let model = document.getElementById('cfg-model').value || "qwen-plus";
+
+        if(!key) {
+            setTimeout(() => {
+                stopLoadingMode();
+                showAIModal("<strong>【演示模式】</strong><br><br>未配置 API Key。<br>星轨连接中断。<br><br>（此处为模拟展示）");
+            }, 4000);
+            return;
+        }
+
+        try {
+            const res = await fetch(url + (url.endsWith('/')?'chat/completions':'/chat/completions'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{role:"user", content: systemPrompt}]
+                })
+            });
+            stopLoadingMode();
+            const data = await res.json();
+            if(data.error) throw new Error(data.error.message);
+            const content = data.choices[0].message.content;
+            chatHistory.push({role: "assistant", content: content});
+            
+            // Parse Markdown first
+            const html = marked.parse(content);
+            showAIModal(html);
+        } catch(e) {
+            stopLoadingMode();
+            showAIModal("连接失败: " + e.message);
+        }
+    }
+
+    // === 9. DOM-WALKER Typewriter ===
+    function showAIModal(htmlContent) {
+        const modal = document.getElementById('ai-modal');
+        const historyDiv = document.getElementById('chat-history');
+        modal.style.display = 'flex';
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'chat-msg-ai';
+        historyDiv.appendChild(msgDiv);
+        
+        // 启动 DOM 漫步者打字机
+        domTypeWriter(htmlContent, msgDiv, () => { historyDiv.scrollTop = historyDiv.scrollHeight; });
+    }
+
+    function domTypeWriter(htmlStr, container, onScroll) {
+        container.innerHTML = ''; 
+        // 光标
+        const cursor = document.createElement('span'); 
+        cursor.className = 'ai-cursor'; 
+        container.appendChild(cursor);
+
+        // 使用临时 div 解析 HTML 结构
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = htmlStr;
+
+        // 扁平化操作队列
+        let queue = [];
+
+        function traverse(node) {
+            if (node.nodeType === Node.TEXT_NODE) {
+                for (let char of node.textContent) {
+                    queue.push({ type: 'char', value: char });
+                }
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                // 开始标签
+                queue.push({ 
+                    type: 'open', 
+                    tagName: node.tagName, 
+                    attributes: Array.from(node.attributes).map(attr => ({name: attr.name, value: attr.value})) 
+                });
+                // 递归子节点
+                node.childNodes.forEach(child => traverse(child));
+                // 结束标签
+                queue.push({ type: 'close' });
+            }
+        }
+
+        Array.from(tempDiv.childNodes).forEach(node => traverse(node));
+
+        let currentParent = container; // 当前插入点容器
+        let i = 0;
+
+        function step() {
+            if (i >= queue.length) {
+                cursor.remove(); 
+                return;
+            }
+
+            const action = queue[i];
+            i++;
+
+            if (action.type === 'char') {
+                // 插入字符：在光标前插入
+                currentParent.insertBefore(document.createTextNode(action.value), cursor);
+            } else if (action.type === 'open') {
+                // 创建元素
+                const el = document.createElement(action.tagName);
+                action.attributes.forEach(attr => el.setAttribute(attr.name, attr.value));
+                
+                // 插入到当前父容器（光标前）
+                currentParent.insertBefore(el, cursor);
+                
+                // 将光标移动到新元素内部，作为接下来的插入点
+                el.appendChild(cursor);
+                currentParent = el;
+            } else if (action.type === 'close') {
+                // 结束元素：将光标移出到上一级
+                const parent = currentParent.parentNode;
+                parent.appendChild(cursor); // 移动光标到父级末尾
+                currentParent = parent;
+            }
+
+            if(onScroll) onScroll();
+
+            // 速度控制：标签瞬间完成，字符有打字感
+            if (action.type === 'char') {
+                setTimeout(step, Math.random() * 15 + 5); // 5-20ms
+            } else {
+                step(); // 标签瞬间处理
+            }
+        }
+
+        step();
+    }
+
+    async function handleFollowUp() {
+        const input = document.getElementById('chat-input');
+        const val = input.value;
+        if(!val) return;
+        
+        const historyDiv = document.getElementById('chat-history');
+        const userDiv = document.createElement('div');
+        userDiv.className = 'chat-msg-user'; userDiv.innerText = val;
+        historyDiv.appendChild(userDiv);
+        input.value = ''; historyDiv.scrollTop = historyDiv.scrollHeight;
+
+        chatHistory.push({role: "user", content: val});
+        
+        const aiDiv = document.createElement('div'); aiDiv.className = 'chat-msg-ai';
+        historyDiv.appendChild(aiDiv); // 先创建空容器
+
+        let url = document.getElementById('cfg-url').value || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+        let key = document.getElementById('cfg-key').value;
+        let model = document.getElementById('cfg-model').value || "qwen-plus";
+
+        try {
+            const res = await fetch(url + (url.endsWith('/')?'chat/completions':'/chat/completions'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [{role:"system", content:"保持风格，严禁列表，多用加粗"}, ...chatHistory]
+                })
+            });
+            const data = await res.json();
+            const content = data.choices[0].message.content;
+            chatHistory.push({role: "assistant", content: content});
+            
+            // 使用 DOM 打字机
+            domTypeWriter(marked.parse(content), aiDiv, () => { historyDiv.scrollTop = historyDiv.scrollHeight; });
+        } catch(e) { aiDiv.innerText = "Error: " + e.message; }
+    }
+
+    function toggleConfig() {
+        const p = document.getElementById('config-panel');
+        p.style.display = (p.style.display==='block')?'none':'block';
+    }
+</script>
+</body>
+</html>
